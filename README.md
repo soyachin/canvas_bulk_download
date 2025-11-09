@@ -11,3 +11,11 @@ A script for downloading almost all files from all of your Canvas courses (past 
 1. Paste your institutional Canvas URL (e.g. https://canvas.ucsd.edu for UCSD) inside the double quotes in the line `API_URL = ""` (line 23).
 2. In the command line, activate your Python environment.
 3. Run `python canvas_bulk_download.py`. By default, all files from all courses you have access to will be downloaded to a subdirectory called `canvas_downloads`. From there, downloads are organized into courses and further into modules. This script does not download any part of Canvas quizzes, so if you have the ability to view your previous quizzes and wish to download them you'll have to modify the script.
+
+## NixOS:
+
+If you use Nix/NixOS you can try this script just by using:
+
+```
+nix run github:soyachin/canvas_bulk_download
+```

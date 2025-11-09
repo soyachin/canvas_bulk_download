@@ -1,39 +1,28 @@
-"""
-canvas_bulk_download.py
-Purpose: A tiny script for bulk downloading files from all Canvas courses.
-Author: ChatGPT-4o with prompting and cleanup by Jake Anderson
-Date: June 17, 2024
-License: The Unlicense (see LICENSE)
-"""
-
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Any
 
 import requests
 from canvasapi import Canvas
 from canvasapi.exceptions import ResourceDoesNotExist, Unauthorized
 from colorama import Fore, Style, init
-from tqdm import tqdm
+from InquirerPy import prompt
+from canvasapi.course import Course
 
-CANVAS_TOKEN = ""
+CANVAS_TOKEN: str = None
+API_URL: str = None
+canvas: Canvas = None 
 
-init(autoreset=True)
-
-API_URL = ""
-canvas = Canvas(API_URL, CANVAS_TOKEN)
-
-MAX_THREADS = 2  # Maximum number of threads
-
+MAX_THREADS: int = 2 
 
 def sanitize_filename(name):
     return re.sub(r"[^\w\-_\. ]", "_", name)
 
 
-def download_file(file_url, file_name, folder_dir, pbar):
+def download_file(file_url, file_name, folder_dir):
     if not file_url.startswith("http"):
         print(Fore.RED + f"Invalid URL: {file_url}")
-        pbar.close()
         return
 
     dest_path = os.path.join(folder_dir, sanitize_filename(file_name))
@@ -44,38 +33,25 @@ def download_file(file_url, file_name, folder_dir, pbar):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-                    pbar.update(len(chunk))
-        pbar.close()
         print(Fore.GREEN + f"Successfully downloaded: {dest_path}")
     except Exception as e:
-        pbar.close()
         print(Fore.RED + f"Failed to download {file_url}: {e}")
 
 
 def process_files(files, folder_dir):
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor: 
         futures = []
         for file in files:
             if not file.url:
                 print(Fore.RED + f"Skipping file with no URL: {file}")
                 continue
-            file_size = int(requests.head(file.url).headers.get("content-length", 0))
-            pbar = tqdm(
-                total=file_size,
-                unit="B",
-                unit_scale=True,
-                desc=sanitize_filename(file.display_name),
-                colour="blue",
-                leave=False,
-            )
             future = executor.submit(
-                download_file, file.url, file.display_name, folder_dir, pbar
+                download_file, file.url, file.display_name, folder_dir
             )
             futures.append(future)
 
         for future in futures:
-            future.result()  # Wait for all futures to complete
-
+            future.result()
 
 def download_folder_contents(folder, folder_dir):
     try:
@@ -98,7 +74,6 @@ def download_course_files(course_id):
         course_name = sanitize_filename(course.name)
         course_dir = os.path.join("canvas_downloads", course_name)
 
-        # Skip if the course directory already exists
         if os.path.exists(course_dir):
             print(
                 Fore.CYAN
@@ -111,9 +86,10 @@ def download_course_files(course_id):
         try:
             folders = course.get_folders()
             root_folder = next(
-                f for f in folders if f.full_name == "course files"
-            )  # Adjust as needed
-            download_folder_contents(root_folder, course_dir)
+                (f for f in folders if f.full_name == "course files"), None
+            )
+            if root_folder:
+                download_folder_contents(root_folder, course_dir)
         except Unauthorized as e:
             print(Fore.RED + f"Unauthorized access in course {course_id}: {e}")
         except Exception as e:
@@ -168,13 +144,111 @@ def download_course_files(course_id):
         print(Fore.RED + f"Error processing course {course_id}: {e}")
 
 
+def get_credentials_interactively():
+    questions = [
+        {
+            "type": "input",
+            "name": "api_url",
+            "message": "Enter your Canvas base URL (e.g., https://[institution].instructure.com/):",
+            "validate": lambda val: True if val.startswith("http") else "URL must start with http:// or https://",
+        },
+        {
+            "type": "password",
+            "name": "token",
+            "message": "Enter your Canvas Personal Access Token:",
+            "validate": lambda val: True if val else "Token cannot be empty.",
+        },
+    ]
+    return prompt(questions)
+
+
+def select_courses_interactively(canvas_courses: List[Course]) -> List[int]:
+    choices = []
+    for course in canvas_courses:
+        label = f"{course.name} (ID: {course.id})"
+        choices.append({"name": label, "value": course.id})
+
+    questions = [
+        {
+            "type": "checkbox",
+            "name": "selected_courses",
+            "message": "Select the courses you want to download:",
+            "choices": choices,
+            "default": [],
+
+            "long_instruction": "Use arrows (↑↓) to navigate, SPACE to select/deselect, Ctrl+A to select All, Ctrl+R to select None , and ENTER to confirm.",
+            "cycle": True
+        }
+    ]
+    
+    try:
+        result = prompt(questions)
+        return result.get("selected_courses", [])
+    except Exception:
+        print(Fore.RED + "\nSelection cancelled or error occurred in the interactive interface.")
+        return []
+
+def get_thread_count_interactively():
+    questions = [
+        {
+            "type": "input",
+            "name": "max_threads",
+            "message": "Enter the maximum number of simultaneous downloads (threads):",
+            "default": "2",
+            "validate": lambda val: True if val.isdigit() and int(val) > 0 else "Please enter a positive integer.",
+        }
+    ]
+    result = prompt(questions)
+    return int(result.get('max_threads', 2))
+
 if __name__ == "__main__":
-    if not os.path.exists("canvas_downloads"):
-        os.makedirs("canvas_downloads")
+    init(autoreset=True)
 
-    # Fetch all courses the current user is enrolled in
-    courses = canvas.get_courses(enrollment_state=["active", "completed"])
-    course_ids = [course.id for course in courses][::-1]
+    try:
+        # 1. GET CREDENTIALS INTERACTIVELY
+        credentials = get_credentials_interactively()
+        
+        API_URL = credentials.get('api_url')
+        CANVAS_TOKEN = credentials.get('token')
+        
+        if not API_URL or not CANVAS_TOKEN:
+            print(Fore.RED + "Incomplete credentials. Exiting.")
+            exit()
+            
+        # 2. GET THREAD COUNT INTERACTIVELY
+        MAX_THREADS = get_thread_count_interactively()
+        
+        # 3. INITIALIZE CANVAS CONNECTION
+        try:
+            canvas = Canvas(API_URL, CANVAS_TOKEN)
+        except Exception as e:
+            print(Fore.RED + f"Error initializing Canvas connection: {e}")
+            exit()
 
-    for course_id in course_ids:
-        download_course_files(course_id)
+        if not os.path.exists("canvas_downloads"):
+            os.makedirs("canvas_downloads")
+            
+        # 4. GET COURSE DATA
+        try:
+            print(Fore.YELLOW + "Connecting to Canvas...")
+            all_courses = list(canvas.get_courses(enrollment_state=["active", "completed"]))
+        except Exception as e:
+            print(Fore.RED + f"Error fetching course list: {e}")
+            exit()
+
+        # 5. INTERACTIVE COURSE SELECTION (TUI)
+        course_ids = select_courses_interactively(all_courses)
+        
+        # 6. EXECUTION
+        course_ids.reverse()
+
+        if not course_ids:
+             print(Fore.RED + "\n No courses selected for download. Exiting... Bye!")
+        else:
+            print(Style.BRIGHT + Fore.YELLOW + f"\n--- STARTING DOWNLOAD OF {len(course_ids)} SELECTED COURSE(S) with {MAX_THREADS} threads ---")
+            for course_id in course_ids:
+                download_course_files(course_id)
+
+    except KeyboardInterrupt:
+        print(Fore.CYAN + Style.BRIGHT + "\n\n Script interrupted by user. Bye-bye!")
+        exit()

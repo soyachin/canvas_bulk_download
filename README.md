@@ -3,8 +3,7 @@ A script for downloading almost all files from all of your Canvas courses (past 
 
 ## Prerequisites:
 1. A python environment that has the libraries `canvasapi`, `colorama`, and `InquirerPy` installed. Once you install Python 3 (and activate your virtual environment if applicable), you can run `pip install canvasapi colorama InquirerPy` to install the necessary packages.
-2. A Canvas API token. You can get one by visiting your Canvas settings page and clicking "+ New Access Token" under the "Approved Integrations" section. Copy the token to your clipboard, then open `canvas_bulk_download.py` and paste the token between the double quotes in the line `CANVAS_TOKEN = ""` (line 19).
-
+2. A Canvas API token. You can get one by visiting your Canvas settings page and clicking "+ New Access Token" under the "Approved Integrations" section. 
     **Warning!** Like all API tokens, keep this secret. If you paste your Canvas API token elsewhere, someone could end up accessing your Canvas account!
 
 ## Usage:
